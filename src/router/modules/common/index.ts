@@ -35,7 +35,7 @@ export const constantRouterMap = [
   },
   {
     path: '/knowledgeGraph',
-    redirect: '/auth/preview',
+    redirect: '/knowledgeGraph/preview',
     hidden: true,
     children: [
       {

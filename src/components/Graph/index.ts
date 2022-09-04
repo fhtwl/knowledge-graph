@@ -1,4 +1,3 @@
-import ForceGraph3D, { ForceGraph3DInstance } from '3d-force-graph';
 import * as THREE from 'three';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
@@ -7,6 +6,8 @@ import { CubeTexturePass } from 'three/examples/jsm/postprocessing/CubeTexturePa
 import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer';
+import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls';
+import ThreeForceGraph from 'three-forcegraph';
 import SpriteText from 'three-spritetext';
 // import { CSS2DRenderer } from './CSS2DRenderer';
 import IMG_TXT from '@/assets/images/3@2x.png';
@@ -83,13 +84,14 @@ export default class GroupChart {
   private isStopFly: boolean;
   public data: ChartData;
   public highlightLinks = new Set();
-  public graph: ForceGraph3DInstance;
+  public graph: ThreeForceGraph;
   public bloomPass?: UnrealBloomPass;
   public scene?: Scene | null;
   public camera?: Camera | null;
   public controls?: object | null;
   public outlinePass?: OutlinePass;
   public renderer?: THREE.WebGLRenderer;
+  public tbControls?: TrackballControls;
   constructor({
     el,
     onClick,
@@ -106,23 +108,13 @@ export default class GroupChart {
       links: [...links],
     };
     console.log(this.data);
-    this.graph = ForceGraph3D({
-      extraRenderers: [new CSS2DRenderer() as unknown as Renderer],
-      // configOptions: {
-      //     controlType: 'orbit'
-      // }
-    })(this.elem)
-      // .backgroundColor('#140f24')
-      // this.graph
+    const graph = new ThreeForceGraph()
       .graphData(this.data)
-      .nodeLabel('') // 设置球体label
       .nodeVal((params) => {
         // 设置球体大小，默认4
         // return params.value
         return (params as unknown as ChartNode)?.val || 10;
       })
-      .showNavInfo(false)
-      // .nodeVal('value')
       .nodeVisibility(() => {
         return true;
       })
@@ -131,7 +123,6 @@ export default class GroupChart {
         const colors = ['#427fd1', '#7250d2', '#b5596d', '#39bdb4'];
         return colors[Math.ceil(Math.random() * 5)];
       })
-      .nodeAutoColorBy('user') // 自动对颜色进行分组
       .nodeOpacity(0.75) // 不透明度，默认0.75
       .nodeResolution(8) // 每个节点的几何分辨率，值越高，越光滑，默认8
       .nodeThreeObjectExtend(true) // 是否只是修改节点对象而不是替换，默认false
@@ -146,17 +137,17 @@ export default class GroupChart {
       })
 
       // .enablePointerInteraction(false) // 关闭鼠标悬浮、点击事件
-      .enableNodeDrag(false)
+      // .enableNodeDrag(false)
       // .onNodeClick(node =>{})
-      .onNodeClick((node, event) => {
-        this.isStopFly = true;
-        console.log(node);
-        this.callback(onClick!, node, event);
-      })
-      .onNodeRightClick((node, event) => {
-        this.isStopFly = true;
-        this.callback(onRightClick!, node, event);
-      })
+      // .onNodeClick((node, event) => {
+      //   this.isStopFly = true;
+      //   console.log(node);
+      //   this.callback(onClick!, node, event);
+      // })
+      // .onNodeRightClick((node, event) => {
+      //   this.isStopFly = true;
+      //   this.callback(onRightClick!, node, event);
+      // })
       .linkResolution(30)
       .linkThreeObjectExtend(true)
       .linkThreeObject((link) => {
@@ -182,54 +173,45 @@ export default class GroupChart {
         Object.assign(sprite.position, [...middlePos]);
         return false;
       });
-    this.graph?.d3Force('link')?.distance(linkVal || 30);
-    // this.setBloomPass();
-    // this.setOutlinePass();
-    // this.antiAliasing();
-
-    this.graph.camera().position.z = 1300; //300
-
-    console.log(this.graph.camera());
-
-    this.controller();
-    isFlycenter && this.flyCenter();
+    this.graph = graph;
+    this.init();
   }
 
-  flyCenter() {
-    if (this.data.nodes.length) {
-      const node = this.data.nodes[0];
-      // globalPage.setData('lastFlyNodeId',node.id)
-      localStorage.setItem('lastFlyNodeId', node.id!);
-      const time = setTimeout(() => {
-        if (this.isStopFly || !this.graph) {
-          return;
-        }
-        this.graph.pauseAnimation();
-        this.fly(node, this.graph, 4500, 0);
-        this.graph.resumeAnimation();
-      }, 6000);
-      times.push(time);
-    }
+  init() {
+    // setup renderer
+    this.renderer = new THREE.WebGL1Renderer();
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.elem.appendChild(this.renderer.domElement);
+
+    // setup scene
+    this.scene = new THREE.Scene();
+    this.scene.add(this.graph);
+    this.scene.add(new THREE.AmbientLight(0xbbbbbb));
+
+    // setup camera
+    this.camera = new THREE.PerspectiveCamera(
+      1000,
+      window.innerWidth / window.innerHeight
+    );
+    this.camera.lookAt(this.graph.position);
+    this.camera.position.z = Math.cbrt(1) * 180;
+
+    // setup camera controls
+    this.tbControls = new TrackballControls(
+      this.camera,
+      this.renderer.domElement
+    );
+
+    this.aniamte();
   }
 
-  destroy() {
-    this.scene = null;
-    this.camera = null;
-    this.controls = null;
-    this.graph.pauseAnimation();
-    this.empty();
-    times.forEach((time) => {
-      clearTimeout(time);
-    });
+  aniamte() {
+    this.graph?.tickFrame();
+    this.tbControls!.update();
+    this.renderer!.render(this.scene!, this.camera!);
+    requestAnimationFrame(this.aniamte.bind(this));
   }
 
-  setNode(arr = []) {
-    const group = new THREE.Group();
-    arr.forEach((node) => {
-      group.add(node);
-    });
-    return group;
-  }
   setNodeText(node: ChartNode) {
     const sprite = new SpriteText(node.label || node.user);
     // sprite.color = '#fff';
@@ -243,146 +225,15 @@ export default class GroupChart {
     return sprite;
   }
 
-  setNodeImg() {
-    const imgTexture = new THREE.TextureLoader().load(IMG_TXT);
-    const material = new THREE.SpriteMaterial({ map: imgTexture });
-    const sprite = new THREE.Sprite(material);
-    sprite.scale.set(12, 12, 12);
-
-    return sprite;
-  }
-
-  // 清除锯齿
-  antiAliasing() {
-    const width = this.elem.offsetWidth; //全屏状态对应窗口宽度
-    const height = this.elem.offsetHeight; //全屏状态对应窗口高度
-    const fxaaPass = new ShaderPass(FXAAShader);
-    const pixelRatio = this.graph.renderer().getPixelRatio();
-    fxaaPass.material.uniforms['resolution'].value.set(
-      1 / width / pixelRatio,
-      1 / height / pixelRatio
-    );
-    // fxaaPass.material.renderToScreen = true;
-    this.graph.postProcessingComposer().addPass(fxaaPass);
-  }
-
-  fly(
-    node: ChartNode,
-    graph: ForceGraph3DInstance,
-    time = 2500,
-    distance = 200
-  ) {
-    console.log(node);
-    const distRatio = 1 + distance / Math.hypot(node.x!, node.y!, node.z!);
-    const lastTime = 400;
-    graph.cameraPosition(
-      {
-        x: node.x! * distRatio,
-        y: node.y! * distRatio,
-        z: node.z! * distRatio,
-      },
-      node as unknown as Coords,
-      time
-    );
-
-    localStorage.setItem('lastFlyNodeId', node.id!);
-    // if (!node.__threeObj) {
-    //   const _node = this.data.nodes.find((s) => {
-    //     return s.id === node.id;
-    //   });
-    //   this.outlinePass!.selectedObjects = [_node!.__threeObj];
-    // } else {
-    //   this.outlinePass!.selectedObjects = [node.__threeObj];
-    // }
-  }
-
-  controller() {
-    this.controls = this.graph.controls();
-    this.camera = this.graph.camera();
-    this.renderer = this.graph.renderer();
-    return;
-  }
-
-  /**
-   * 设置光效
-   */
-  setBloomPass() {
-    const bloomPass = new UnrealBloomPass(new THREE.Vector2(266, 266), 1, 1, 1);
-
-    bloomPass.strength = 0.1;
-    bloomPass.radius = 1;
-    bloomPass.threshold = 0.1;
-    this.graph.postProcessingComposer().addPass(bloomPass);
-    this.bloomPass = bloomPass;
-  }
-
-  /**
-   * 添加边缘发光
-   */
-  setOutlinePass() {
-    const outlinePass = new OutlinePass(
-      new THREE.Vector2(window.innerWidth, window.innerHeight),
-      this.graph.scene(),
-      this.graph.camera()
-    ); // UnrealBloomPass(); // OutlinePass
-    outlinePass.renderToScreen = true;
-    outlinePass.edgeStrength = 8.7;
-    outlinePass.edgeGlow = 0;
-    outlinePass.edgeThickness = 2.6;
-    outlinePass.pulsePeriod = 2;
-    outlinePass.usePatternTexture = false;
-    outlinePass.visibleEdgeColor.set('#FC6102');
-    outlinePass.hiddenEdgeColor.set('#190a05');
-    this.graph.postProcessingComposer().addPass(outlinePass);
-    this.outlinePass = outlinePass;
-  }
-
-  /**
-   * 添加纹理
-   */
-  setTexturePass() {
-    const texture = new THREE.TextureLoader().load(IMG_TXT);
-    const bloomPass = new TexturePass(texture);
-    bloomPass.map = texture;
-    this.graph.postProcessingComposer().addPass(bloomPass);
-    // this.bloomPass = bloomPass
-  }
-
-  /**
-   * 添加全景背景
-   */
-  setBgPass() {
-    const cubeTexturePass = new CubeTexturePass(
-      this.graph.camera() as unknown as PerspectiveCamera
-    );
-    this.graph.postProcessingComposer().addPass(cubeTexturePass);
-    const map = new THREE.CubeTextureLoader()
-      // .setPath("textures/cube/pisa/")
-      .load([
-        // "px.png","nx.png",
-        // "py.png","ny.png",
-        // "pz.png","nz.png",
-        IMG_BG,
-        IMG_BG,
-        IMG_BG,
-        IMG_BG,
-        IMG_BG,
-        IMG_BG,
-      ]);
-    cubeTexturePass.envMap = map;
-    // cubeTexturePass.opacity = 0.6
-    // console.log(this.bloomPass,this.graph.camera(),this.graph.controls())
-  }
-
   // 更新数据
   update(data: ChartData) {
     this.data = data ? data : this.data;
     this.graph.graphData(this.data);
     this.graph.refresh();
     if (this.data.nodes.length > 0) {
-      setTimeout(() => {
-        this.fly(this.data.nodes[0], this.graph);
-      }, 200);
+      // setTimeout(() => {
+      //   this.fly(this.data.nodes[0], this.graph);
+      // }, 200);
     }
     console.log(this.data);
   }
@@ -406,7 +257,7 @@ export default class GroupChart {
   ) {
     let intersects = [];
     // 获取整个场景
-    const theScene = this.graph.scene() || new THREE.Scene();
+    const theScene = this.scene || new THREE.Scene();
     // 获取鼠标点击点的射线
     const theRaycaster = raycaster || new THREE.Raycaster();
     // 对场景及其子节点遍历
